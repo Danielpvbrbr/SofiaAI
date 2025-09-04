@@ -1,0 +1,128 @@
+# 🤖 Guia Completo de Comandos Ollama
+
+## 📥 **BAIXAR MODELOS**
+```bash
+ollama pull llama2                    # Baixa modelo do repositório
+ollama pull gemma:2b                  # Baixa versão específica
+ollama pull codellama:13b-instruct    # Baixa modelo para código
+```
+
+## 🎯 **EXECUTAR MODELOS**
+```bash
+ollama run llama2                     # Inicia chat interativo
+ollama run llama2 "Pergunta aqui"    # Pergunta única
+ollama run sofiaai-personal           # Roda seu modelo personalizado
+```
+
+## 📝 **CRIAR MODELOS PERSONALIZADOS**
+```bash
+ollama create meu-modelo -f Modelfile       # Cria modelo do Modelfile
+ollama create nome-modelo -f arquivo.txt    # Cria de arquivo específico
+```
+
+## 📋 **LISTAR E GERENCIAR**
+```bash
+ollama list                           # Lista todos os modelos
+ollama ls                            # Mesmo que list (abreviado)
+ollama show llama2                   # Mostra detalhes do modelo
+ollama show llama2 --modelfile       # Mostra o Modelfile usado
+```
+
+## 🗑️ **DELETAR MODELOS**
+```bash
+ollama rm llama2                     # Remove modelo específico
+ollama rm llama2:13b                 # Remove versão específica
+ollama rm sofiaai:latest             # Remove por tag
+```
+
+## 💾 **COPIAR E RENOMEAR**
+```bash
+ollama cp llama2 minha-llama         # Copia/renomeia modelo
+ollama cp sofiaai-personal backup    # Faz backup do modelo
+```
+
+## 🔧 **SERVIDOR E SERVIÇOS**
+```bash
+ollama serve                         # Inicia servidor Ollama
+ollama ps                           # Lista modelos em execução
+```
+
+## 🌐 **API E INTEGRAÇÃO**
+```bash
+# Usar via API REST
+curl http://localhost:11434/api/generate -d '{
+  "model": "sofiaai-personal",
+  "prompt": "Olá!"
+}'
+```
+
+## 📊 **INFORMAÇÕES DO SISTEMA**
+```bash
+ollama version                       # Mostra versão do Ollama
+ollama --help                      # Ajuda geral
+ollama run --help                  # Ajuda para comando específico
+```
+
+## ⚙️ **PARÂMETROS AVANÇADOS**
+```bash
+# Executar com parâmetros personalizados
+ollama run llama2 --temperature 0.8 "Pergunta"
+ollama run llama2 --num-predict 100 "Pergunta"
+ollama run llama2 --top-p 0.9 "Pergunta"
+```
+
+## 🚀 **DICAS ÚTEIS**
+
+### **Listar modelos por tamanho:**
+```bash
+ollama list | sort -k3 -h           # Ordena por tamanho
+```
+
+### **Verificar espaço usado:**
+```bash
+ollama list | awk '{sum+=$3} END {print "Total:", sum "GB"}'
+```
+
+### **Executar em modo não-interativo:**
+```bash
+echo "Sua pergunta" | ollama run sofiaai-personal
+```
+
+### **Salvar resposta em arquivo:**
+```bash
+ollama run llama2 "Explique IA" > resposta.txt
+```
+
+## 📂 **LOCALIZAÇÃO DOS ARQUIVOS**
+- **Windows:** `C:\Users\%USERNAME%\.ollama\models`
+- **Linux/Mac:** `~/.ollama/models`
+
+## 🔥 **COMANDOS MAIS USADOS NO DIA A DIA**
+```bash
+ollama list                          # Ver seus modelos
+ollama run sofiaai-personal          # Usar sua SofiaAI
+ollama rm modelo-antigo              # Limpar espaço
+ollama pull novo-modelo              # Baixar modelo novo
+ollama create backup -f Modelfile    # Fazer backup personalizado
+```
+
+## ⚡ **ATALHOS RÁPIDOS**
+- `Ctrl+C` - Sair do chat
+- `Ctrl+D` - Sair do modelo  
+- `/bye` - Sair (em alguns modelos)
+- `/clear` - Limpar conversa
+
+## 🎯 **EXEMPLOS PRÁTICOS PARA SOFIAAI**
+```bash
+# Testar a SofiaAI
+ollama run sofiaai-personal "Quem te criou?"
+
+# Fazer backup
+ollama cp sofiaai-personal sofiaai-backup
+
+# Ver detalhes
+ollama show sofiaai-personal
+
+# Usar para código
+ollama run sofiaai-personal "Como fazer um loop em Python?"
+```
