@@ -147,9 +147,23 @@ export const ModelSelect = styled.select`
 
 export const Messages = styled.div`
   flex: 1;
-  /* overflow-y: auto; */
-  padding: 0;
-  /* border: 1px solid green ; */
+  padding: 16px 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  /* scrollbar custom */
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: #565869;
+    border-radius: 3px;
+  }
 `;
 
 export const EmptyState = styled.div`

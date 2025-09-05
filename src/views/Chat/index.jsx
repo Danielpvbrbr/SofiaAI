@@ -48,13 +48,7 @@ export default function Chat() {
   const messagesEndRef = useRef(null);
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 5;
-
-  const modelos = {
-    phi: { name: "Phi v1", desc: "Modelo compacto e eficiente" },
-    gmm_v3: { name: "GMM v3", desc: "Versão mais avançada (Recomendado)" },
-    gmm_v2: { name: "GMM v2", desc: "Versão intermediária" },
-    gmm_v1: { name: "GMM v1", desc: "Versão inicial" }
-  };
+  const [models, setModels] = useState([]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -176,34 +170,23 @@ export default function Chat() {
     }
 
     const message = input.trim();
-
     if (!message || isGenerating) return;
+
     setMessages((prev) => [
       ...prev,
-      {
-        role: "user",
-        text: message,
-        timestamp: new Date().toLocaleTimeString()
-      },
-      {
-        role: "assistant",
-        text: "",
-        model: selectedModel,
-        timestamp: new Date().toLocaleTimeString()
-      }
+      { role: "user", text: message, timestamp: new Date().toLocaleTimeString() },
+      { role: "assistant", text: "", model: selectedModel, timestamp: new Date().toLocaleTimeString() }
     ]);
 
     ws.send(JSON.stringify({
       prompt: message,
-      modelo: selectedModel === "gmm_v3" ? "sofiaai_gmm_v3:latest" :
-        selectedModel === "gmm_v2" ? "sofiaai_gmm_v2:latest" :
-          selectedModel === "gmm_v1" ? "sofiaai_gmm_v1:latest" :
-            "sofiaai_phi_v1:latest"
+      modelo: selectedModel // agora já vem do Ollama
     }));
 
     setInput("");
     setIsGenerating(true);
   };
+
 
   const handleKeyPress = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -215,6 +198,25 @@ export default function Chat() {
   const clearChat = () => setMessages([]);
   const newChat = () => { clearChat(); setSidebarOpen(false); };
 
+  // 🔎 Buscar modelos disponíveis no Ollama
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const res = await fetch("http://127.0.0.1:11434/api/tags");
+        if (res.ok) {
+          const data = await res.json();
+          setModels(data.models || []);
+          if (data.models.length > 0) {
+            setSelectedModel(data.models[0].name); // seleciona o primeiro por padrão
+          }
+        }
+      } catch (err) {
+        console.error("Erro ao carregar modelos:", err);
+      }
+    };
+    fetchModels();
+  }, []);
+
   return (
     <Container>
       <Sidebar open={sidebarOpen}>
@@ -222,7 +224,8 @@ export default function Chat() {
           <NewChatButton onClick={newChat}>➕ Nova conversa</NewChatButton>
           <ModelBox>
             <h3>Modelo Ativo</h3>
-            <ActiveModel>{modelos[selectedModel]?.name}</ActiveModel>
+            <ActiveModel>{selectedModel}</ActiveModel>
+
           </ModelBox>
           {serverStatus && (
             <ServerStatus>
@@ -249,10 +252,13 @@ export default function Chat() {
               onChange={(e) => setSelectedModel(e.target.value)}
               disabled={isGenerating}
             >
-              {Object.entries(modelos).map(([key, model]) => (
-                <option key={key} value={key}>{model.name}</option>
+              {models.map((model) => (
+                <option key={model.name} value={model.name}>
+                  {model.name} {/* ou model.details?.parameter_size + " • " + model.name */}
+                </option>
               ))}
             </ModelSelect>
+
           </HeaderRight>
         </Header>
         <AreaMain>
@@ -274,7 +280,7 @@ export default function Chat() {
                     <MessageContent>
                       <MessageHeader>
                         {msg.role === "user" ? "Você" : msg.role === "error" ? "Erro" : "SofiaAI"}
-                        {msg.model && <ModelTag>• {modelos[msg.model]?.name || msg.model}</ModelTag>}
+                        {msg.model && <ModelTag>• {msg.model}</ModelTag>}
                       </MessageHeader>
                       <MessageText role={msg.role}>
                         {msg.text || (msg.role === "assistant" && isGenerating ? (

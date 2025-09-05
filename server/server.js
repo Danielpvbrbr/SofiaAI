@@ -14,7 +14,7 @@ app.use(express.json());
 // Configuração dos modelos SofiaAI
 const MODELOS = {
   phi: "sofiaai_phi_v1:latest",
-  gmm_v3: "sofiaai_gmm_v3:latest",
+  gmm_v3: "sofiaai_gmm_v3:latest", 
   gmm_v2: "sofiaai_gmm_v2:latest",
   gmm_v1: "sofiaai_gmm_v1:latest"
 };
@@ -23,7 +23,7 @@ const MODELO_DEFAULT = MODELOS.gmm_v3; // Modelo padrão
 const OLLAMA_URL = "http://localhost:11434";
 
 // WebSocket Server
-const wss = new WebSocketServer({
+const wss = new WebSocketServer({ 
   server,
   path: '/ws'
 });
@@ -34,13 +34,13 @@ async function testarOllama() {
     const res = await fetch(`${OLLAMA_URL}/api/tags`);
     if (res.ok) {
       const data = await res.json();
-      console.log("Ollama conectado!");
-      console.log("Modelos disponíveis:", data.models?.map(m => m.name) || []);
+      console.log("✅ Ollama conectado!");
+      console.log("📦 Modelos disponíveis:", data.models?.map(m => m.name) || []);
       return true;
     }
     return false;
   } catch (err) {
-    console.error("Erro ao conectar com Ollama:", err.message);
+    console.error("❌ Erro ao conectar com Ollama:", err.message);
     return false;
   }
 }
@@ -48,8 +48,8 @@ async function testarOllama() {
 // Função para gerar resposta com streaming
 async function gerarRespostaStream(modelo, prompt, ws) {
   try {
-    console.log(`Gerando resposta com modelo: ${modelo}`);
-    console.log(`Prompt: ${prompt}`);
+    console.log(`🤖 Gerando resposta com modelo: ${modelo}`);
+    console.log(`📝 Prompt: ${prompt}`);
 
     const res = await fetch(`${OLLAMA_URL}/api/generate`, {
       method: "POST",
@@ -77,7 +77,7 @@ async function gerarRespostaStream(modelo, prompt, ws) {
     reader.on('data', (chunk) => {
       buffer += chunk.toString();
       const lines = buffer.split('\n');
-
+      
       // Mantém a última linha no buffer caso esteja incompleta
       buffer = lines.pop() || '';
 
@@ -85,7 +85,7 @@ async function gerarRespostaStream(modelo, prompt, ws) {
         if (line.trim()) {
           try {
             const data = JSON.parse(line);
-
+            
             if (data.response) {
               // Envia cada token para o cliente
               ws.send(JSON.stringify({
@@ -93,16 +93,16 @@ async function gerarRespostaStream(modelo, prompt, ws) {
                 text: data.response
               }));
             }
-
+            
             if (data.done) {
               // Finaliza o streaming
               ws.send(JSON.stringify({
                 type: 'done'
               }));
-              console.log("Resposta finalizada");
+              console.log("✅ Resposta finalizada");
             }
           } catch (parseErr) {
-            console.warn("Erro ao parsear linha:", line);
+            console.warn("⚠️ Erro ao parsear linha:", line);
           }
         }
       }
@@ -115,20 +115,20 @@ async function gerarRespostaStream(modelo, prompt, ws) {
           const data = JSON.parse(buffer);
           if (data.response) {
             ws.send(JSON.stringify({
-              type: 'token',
+              type: 'token', 
               text: data.response
             }));
           }
         } catch (parseErr) {
-          console.warn("Erro ao parsear buffer final");
+          console.warn("⚠️ Erro ao parsear buffer final");
         }
       }
-
+      
       ws.send(JSON.stringify({ type: 'done' }));
     });
 
     reader.on('error', (err) => {
-      console.error("Erro no stream:", err);
+      console.error("❌ Erro no stream:", err);
       ws.send(JSON.stringify({
         type: 'error',
         message: `Erro no streaming: ${err.message}`
@@ -136,10 +136,10 @@ async function gerarRespostaStream(modelo, prompt, ws) {
     });
 
   } catch (err) {
-    console.error("Erro ao gerar resposta:", err.message);
-
+    console.error("❌ Erro ao gerar resposta:", err.message);
+    
     let errorMessage = "Erro interno do servidor";
-
+    
     if (err.code === 'ECONNREFUSED') {
       errorMessage = "Ollama não está rodando. Execute: ollama serve";
     } else if (err.message.includes('404') || err.message.includes('not found')) {
@@ -158,7 +158,7 @@ async function gerarRespostaStream(modelo, prompt, ws) {
 // Conexões WebSocket
 wss.on('connection', (ws, req) => {
   const clientIp = req.socket.remoteAddress;
-  console.log(`Nova conexão WebSocket de ${clientIp}`);
+  console.log(`🔗 Nova conexão WebSocket de ${clientIp}`);
 
   ws.on('message', async (message) => {
     try {
@@ -175,13 +175,13 @@ wss.on('connection', (ws, req) => {
 
       // Use o modelo especificado ou o padrão
       const modeloEscolhido = modelo || MODELO_DEFAULT;
-
-      console.log(`Mensagem recebida de ${clientIp}: "${prompt.substring(0, 50)}..."`);
-
+      
+      console.log(`📨 Mensagem recebida de ${clientIp}: "${prompt.substring(0, 50)}..."`);
+      
       await gerarRespostaStream(modeloEscolhido, prompt, ws);
 
     } catch (err) {
-      console.error("Erro ao processar mensagem:", err);
+      console.error("❌ Erro ao processar mensagem:", err);
       ws.send(JSON.stringify({
         type: 'error',
         message: 'Erro ao processar mensagem'
@@ -190,17 +190,17 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
-    console.log(`Conexão WebSocket fechada: ${clientIp}`);
+    console.log(`❌ Conexão WebSocket fechada: ${clientIp}`);
   });
 
   ws.on('error', (err) => {
-    console.error(`Erro na conexão WebSocket ${clientIp}:`, err);
+    console.error(`❌ Erro na conexão WebSocket ${clientIp}:`, err);
   });
 
   // Envia mensagem de boas-vindas
   ws.send(JSON.stringify({
     type: 'info',
-    message: 'Conectado ao SofiaAI WebSocket Server!'
+    message: '🤖 Conectado ao SofiaAI WebSocket Server!'
   }));
 });
 
@@ -239,28 +239,28 @@ app.get('/', (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, async () => {
-  console.log(`SofiaAI WebSocket Server rodando na porta ${PORT}`);
-  console.log(`WebSocket: ws://localhost:${PORT}/ws`);
-  console.log(`API: http://localhost:${PORT}`);
-
+  console.log(`🚀 SofiaAI WebSocket Server rodando na porta ${PORT}`);
+  console.log(`🔗 WebSocket: ws://localhost:${PORT}/ws`);
+  console.log(`📡 API: http://localhost:${PORT}`);
+  
   // Testa conexão com Ollama
   const ollamaOk = await testarOllama();
   if (!ollamaOk) {
-    console.warn("Ollama não está acessível. Certifique-se de executar: ollama serve");
+    console.warn("⚠️ Ollama não está acessível. Certifique-se de executar: ollama serve");
   }
-
-  console.log("\nModelos configurados:");
+  
+  console.log("\n📋 Modelos configurados:");
   Object.entries(MODELOS).forEach(([key, value]) => {
     console.log(`  ${key}: ${value}`);
   });
-  console.log(`\nModelo padrão: ${MODELO_DEFAULT}`);
+  console.log(`\n🎯 Modelo padrão: ${MODELO_DEFAULT}`);
 });
 
 // Graceful shutdown
 process.on('SIGINT', () => {
-  console.log('\n Encerrando servidor...');
+  console.log('\n👋 Encerrando servidor...');
   server.close(() => {
-    console.log('Servidor encerrado com sucesso');
+    console.log('✅ Servidor encerrado com sucesso');
     process.exit(0);
   });
 });
