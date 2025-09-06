@@ -1,54 +1,31 @@
-import { useState, useEffect, useRef } from "react";
+import { useContext, useRef, useEffect, useState } from "react";
+import { AuthContext } from "../../context/AuthContext.jsx"
+import CodeBlock from "../../components/CodeBlock.jsx";
 import {
-  Container,
-  Sidebar,
-  SidebarContent,
-  NewChatButton,
-  ModelBox,
-  ActiveModel,
-  ServerStatus,
-  Main,
-  AreaMain,
-  Header,
-  HeaderLeft,
-  SidebarToggle,
-  ConnectionStatus,
-  StatusDot,
-  HeaderRight,
-  ModelSelect,
-  Messages,
-  EmptyState,
-  Emoji,
-  MessageContainer,
-  MessageWrapper,
-  Avatar,
-  MessageContent,
-  MessageHeader,
-  ModelTag,
-  MessageText,
-  Loading,
-  Spinner,
-  Timestamp,
-  InputArea,
-  InputWrapper,
-  TextArea,
-  SendButton,
-  Disclaimer
+  Container, Sidebar, SidebarContent, NewChatButton, ModelBox,
+  ActiveModel, ServerStatus, Main, AreaMain, Header, HeaderLeft,
+  SidebarToggle, ConnectionStatus, StatusDot, HeaderRight, ModelSelect,
+  Messages, EmptyState, Emoji, MessageContainer, MessageWrapper, Avatar,
+  MessageContent, MessageHeader, ModelTag, MessageText, Loading, Spinner,
+  Timestamp, InputArea, InputWrapper, TextArea, SendButton, Disclaimer
 } from "./styles";
+import logo from "../../../public/logobranca.png"
 
 export default function Chat() {
-  const [ws, setWs] = useState(null);
-  const [messages, setMessages] = useState([]);
+  const {
+    messages,
+    isConnected,
+    isGenerating,
+    selectedModel,
+    setSelectedModel,
+    models,
+    sendMessage,
+    clearChat,
+  } = useContext(AuthContext);
+
   const [input, setInput] = useState("");
-  const [isConnected, setIsConnected] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [selectedModel, setSelectedModel] = useState("gmm_v3");
-  const [serverStatus, setServerStatus] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const messagesEndRef = useRef(null);
-  const reconnectAttempts = useRef(0);
-  const maxReconnectAttempts = 5;
-  const [models, setModels] = useState([]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -58,181 +35,27 @@ export default function Chat() {
     scrollToBottom();
   }, [messages]);
 
-  const fetchServerStatus = async () => {
-    try {
-      const res = await fetch("http://localhost:3000/api/status");
-      if (res.ok) {
-        const status = await res.json();
-        setServerStatus(status);
-      }
-    } catch (err) {
-      console.warn("Não foi possível obter status do servidor:", err.message);
-    }
-  };
-
-  useEffect(() => {
-    fetchServerStatus();
-    const interval = setInterval(fetchServerStatus, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const connectWebSocket = () => {
-      const socket = new WebSocket("ws://localhost:3000/ws");
-
-      socket.onopen = () => {
-        console.log("✅ Conectado ao servidor SofiaAI");
-        setWs(socket);
-        setIsConnected(true);
-        reconnectAttempts.current = 0;
-      };
-
-      socket.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-
-          if (data.type === "token") {
-            setMessages((prev) => {
-              const updated = [...prev];
-              if (updated.length > 0 && updated[updated.length - 1].role === "assistant") {
-                if (!updated[updated.length - 1].text.includes(data.text)) {
-                  updated[updated.length - 1].text += data.text;
-                }
-              }
-
-              return updated;
-            });
-          } else if (data.type === "done") {
-            console.log("✅ Resposta finalizada");
-            setIsGenerating(false);
-          } else if (data.type === "error") {
-            console.error("❌ Erro:", data.message);
-            setMessages((prev) => [...prev, {
-              role: "error",
-              text: data.message,
-              timestamp: new Date().toLocaleTimeString()
-            }]);
-            setIsGenerating(false);
-          } else if (data.type === "info") {
-            console.log("ℹ️ Info:", data.message);
-          }
-        } catch (err) {
-          console.error("Erro ao processar mensagem:", err);
-          setIsGenerating(false);
-        }
-      };
-
-      socket.onclose = () => {
-        console.log("❌ Desconectado do servidor");
-        setWs(null);
-        setIsConnected(false);
-        setIsGenerating(false);
-
-        if (reconnectAttempts.current < maxReconnectAttempts) {
-          reconnectAttempts.current++;
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 10000);
-          console.log(`🔄 Tentando reconectar em ${delay / 1000}s (${reconnectAttempts.current}/${maxReconnectAttempts})`);
-
-          setTimeout(() => {
-            connectWebSocket();
-          }, delay);
-        } else {
-          console.error("❌ Máximo de tentativas de reconexão atingido");
-          setMessages(prev => [...prev, {
-            role: "error",
-            text: "Conexão perdida. Recarregue a página para tentar novamente.",
-            timestamp: new Date().toLocaleTimeString()
-          }]);
-        }
-      };
-
-      socket.onerror = (error) => {
-        console.error("Erro no WebSocket:", error);
-        setIsConnected(false);
-        setIsGenerating(false);
-      };
-
-      return socket;
-    };
-
-    const socket = connectWebSocket();
-    return () => {
-      if (socket) {
-        socket.close();
-      }
-    };
-  }, []);
-
-  const sendMessage = () => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.warn("⚠️ WebSocket não está conectado");
-      return;
-    }
-
-    const message = input.trim();
-    if (!message || isGenerating) return;
-
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", text: message, timestamp: new Date().toLocaleTimeString() },
-      { role: "assistant", text: "", model: selectedModel, timestamp: new Date().toLocaleTimeString() }
-    ]);
-
-    ws.send(JSON.stringify({
-      prompt: message,
-      modelo: selectedModel // agora já vem do Ollama
-    }));
-
+  const handleSend = () => {
+    sendMessage(input);
     setInput("");
-    setIsGenerating(true);
   };
-
 
   const handleKeyPress = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      handleSend();
     }
   };
-
-  const clearChat = () => setMessages([]);
-  const newChat = () => { clearChat(); setSidebarOpen(false); };
-
-  // 🔎 Buscar modelos disponíveis no Ollama
-  useEffect(() => {
-    const fetchModels = async () => {
-      try {
-        const res = await fetch("http://127.0.0.1:11434/api/tags");
-        if (res.ok) {
-          const data = await res.json();
-          setModels(data.models || []);
-          if (data.models.length > 0) {
-            setSelectedModel(data.models[0].name); // seleciona o primeiro por padrão
-          }
-        }
-      } catch (err) {
-        console.error("Erro ao carregar modelos:", err);
-      }
-    };
-    fetchModels();
-  }, []);
 
   return (
     <Container>
       <Sidebar open={sidebarOpen}>
         <SidebarContent>
-          <NewChatButton onClick={newChat}>➕ Nova conversa</NewChatButton>
+          <NewChatButton onClick={clearChat}>➕ Nova conversa</NewChatButton>
           <ModelBox>
             <h3>Modelo Ativo</h3>
             <ActiveModel>{selectedModel}</ActiveModel>
-
           </ModelBox>
-          {serverStatus && (
-            <ServerStatus>
-              <div>Status: {serverStatus.ollama === 'connected' ? '🟢 Online' : '🔴 Offline'}</div>
-              <div>Conexões: {serverStatus.conexoes}</div>
-            </ServerStatus>
-          )}
         </SidebarContent>
       </Sidebar>
 
@@ -253,43 +76,47 @@ export default function Chat() {
               disabled={isGenerating}
             >
               {models.map((model) => (
-                <option key={model.name} value={model.name}>
-                  {model.name} {/* ou model.details?.parameter_size + " • " + model.name */}
-                </option>
+                <option key={model} value={model}>{model}</option>
               ))}
             </ModelSelect>
-
           </HeaderRight>
         </Header>
-        <AreaMain>
 
+        <AreaMain>
           <Messages>
             {messages.length === 0 ? (
               <EmptyState>
-                <Emoji>🤖</Emoji>
+                <Emoji src={logo} alt="SofiaAI" />
                 <h2>Como posso ajudar você hoje?</h2>
-                <p>Escolha um modelo e comece uma conversa</p>
               </EmptyState>
             ) : (
               messages.map((msg, i) => (
                 <MessageContainer key={i} role={msg.role}>
                   <MessageWrapper>
-                    <Avatar role={msg.role}>
-                      {msg.role === "user" ? "👤" : msg.role === "error" ? "⚠️" : "🤖"}
-                    </Avatar>
                     <MessageContent>
                       <MessageHeader>
                         {msg.role === "user" ? "Você" : msg.role === "error" ? "Erro" : "SofiaAI"}
-                        {msg.model && <ModelTag>• {msg.model}</ModelTag>}
                       </MessageHeader>
                       <MessageText role={msg.role}>
-                        {msg.text || (msg.role === "assistant" && isGenerating ? (
-                          <Loading>
-                            <Spinner /> Pensando...
-                          </Loading>
-                        ) : "")}
+                        {msg.text.includes("```") ? (
+                          msg.text.split("```").map((block, i) => {
+                            if (i % 2 === 1) {
+                              const [lang, ...code] = block.split("\n");
+                              return <CodeBlock key={i} language={lang} value={code.join("\n")} />;
+                            }
+                            return <span key={i}>{block}</span>;
+                          })
+                        ) : (
+                          msg.role === "assistant" && isGenerating ? (
+                            <Loading>
+                              <Spinner /> Pensando...
+                            </Loading>
+                          ) : (
+                            msg.text
+                          )
+                        )}
                       </MessageText>
-                      {msg.timestamp && <Timestamp>{msg.timestamp}</Timestamp>}
+
                     </MessageContent>
                   </MessageWrapper>
                 </MessageContainer>
@@ -308,7 +135,7 @@ export default function Chat() {
                 placeholder={!isConnected ? "Conectando ao servidor..." : isGenerating ? "Aguarde a resposta..." : "Envie uma mensagem..."}
               />
               <SendButton
-                onClick={sendMessage}
+                onClick={handleSend}
                 disabled={!isConnected || isGenerating || !input.trim()}
                 generating={isGenerating}
                 hasInput={!!input.trim()}
@@ -323,5 +150,3 @@ export default function Chat() {
     </Container>
   );
 }
-
-

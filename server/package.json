@@ -7,14 +7,15 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "dev2":"node server2.js",
+    "dev2": "node server2.js",
     "test": "curl http://localhost:3000/api/status"
   },
   "dependencies": {
+    "axios": "^1.11.0",
+    "cors": "^2.8.5",
     "express": "^4.18.2",
-    "ws": "^8.14.2",
     "node-fetch": "^3.3.2",
-    "cors": "^2.8.5"
+    "ws": "^8.14.2"
   },
   "engines": {
     "node": ">=18.0.0"

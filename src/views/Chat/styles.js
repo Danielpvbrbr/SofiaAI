@@ -77,7 +77,9 @@ export const Main = styled.div`
 export const AreaMain = styled.div`
   max-width: 900px;
   width: 100%;   
-  flex: 1;   
+  height: 92%;
+  max-height: 100%;
+  /* border: 1px solid red; */
   display: flex;
   flex-direction: column;
 `;
@@ -112,6 +114,7 @@ export const SidebarToggle = styled.button`
   padding: 8px;
   border-radius: 4px;
   font-size: 16px;
+  outline: none;
 `;
 
 export const ConnectionStatus = styled.div`
@@ -176,13 +179,8 @@ export const EmptyState = styled.div`
   padding: 40px;
 `;
 
-export const Emoji = styled.div`
-  font-size: 48px;
-  margin-bottom: 16px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+export const Emoji = styled.img`
+ width: 90px;
 `;
 
 export const MessageContainer = styled.div`
@@ -204,7 +202,7 @@ export const Avatar = styled.div`
   height: 32px;
   border-radius: 4px;
   background-color: ${(props) =>
-        props.role === "user" ? "#5436da" : props.role === "error" ? "#ef4444" : "#10a37f"};
+    props.role === "user" ? "#5436da" : props.role === "error" ? "#ef4444" : "#10a37f"};
   display: flex;
   align-items: center;
   justify-content: center;
