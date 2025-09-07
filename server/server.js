@@ -3,166 +3,190 @@ import { WebSocketServer } from 'ws';
 import fetch from 'node-fetch';
 import cors from 'cors';
 import { createServer } from 'http';
+import http from 'http';
+import path from "path";
+import { fileURLToPath } from "url";
 
-const app = express();
-const server = createServer(app);
+// Corrige __dirname no ES Modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-app.use(cors());
-app.use(express.json());
+// 🔧 Configurações principais
+const CONFIG = {
+  KEEP_ALIVE: "60m",
+  MAX_CONNECTIONS: 20,
+  KEEP_ALIVE_TIMEOUT: 60000,
+  MODEL_OPTIONS: {
+    num_ctx: 4096,
+    num_batch: 64,
+    num_gpu: -1,
+    num_thread: -1,
+    use_mmap: true,
+    use_mlock: true,
+    num_keep: -1,
+    repeat_penalty: 1.0,
+    temperature: 0.4,
+    top_p: 0.9,
+    top_k: 40,
+    flash_attention: true,
+    low_vram: false,
+    main_gpu: 0
+  }
+};
 
 const OLLAMA_URL = "http://localhost:11434";
 
-// Função para listar modelos do Ollama dinamicamente
-async function listarModelos() {
-  try {
-    const res = await fetch(`${OLLAMA_URL}/api/tags`);
-    if (!res.ok) throw new Error(`Erro HTTP ${res.status}`);
-    const data = await res.json();
-    return data.models?.map(m => m.name) || [];
-  } catch (err) {
-    console.error("Erro ao buscar modelos:", err.message);
-    return [];
-  }
-}
-
-// Função para escolher modelo padrão
-async function getModeloPadrao() {
-  const modelos = await listarModelos();
-  if (modelos.length === 0) return null;
-  return process.env.MODELO_DEFAULT || modelos[0];
-}
-
-// WebSocket Server
-const wss = new WebSocketServer({
-  server,
-  path: '/ws'
+// 🔥 Agent otimizado
+const ultraAgent = new http.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 500,
+  maxSockets: CONFIG.MAX_CONNECTIONS,
+  freeSocketTimeout: CONFIG.KEEP_ALIVE_TIMEOUT
 });
 
-// Função para gerar resposta (igual a sua, só tiramos dependência fixa de MODELOS)
-async function gerarRespostaStream(modelo, prompt, ws) {
-  try {
-    const res = await fetch(`${OLLAMA_URL}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: modelo,
-        prompt: prompt,
-        stream: true,
-        options: {
-          temperature: 0.4,//→ deixa mais criativo ou conservador
-          top_p: 0.9, //→ filtra por probabilidade cumulativa
-          top_k: 40 //→ limita aos mais prováveis
-        }
-      })
+const app = express();
+const server = createServer(app);
+app.use(cors({ origin: "*", methods: ["GET", "POST"] }));
+app.use(express.json({ limit: '10mb' }));
+
+// Caminho do build do frontend
+const distPath = path.join(__dirname, 'dist');
+app.use(express.static(distPath)); // serve arquivos est�ticos
+const wss = new WebSocketServer({
+  server, path: '/ws',
+  perMessageDeflate: false,
+  clientTracking: true,
+  maxPayload: 100 * 1024 * 1024
+});
+
+class ModelCache {
+  constructor() {
+    this.loaded = new Map();
+    this.loading = new Map();
+    this.lastAccess = new Map();
+    this.stats = new Map();
+  }
+
+  isLoaded(m) { return this.loaded.has(m); }
+  updateAccess(m) { this.lastAccess.set(m, Date.now()); }
+
+  async ensureLoaded(model) {
+    if (this.isLoaded(model)) return this.updateAccess(model), true;
+    if (this.loading.has(model)) return await this.loading.get(model);
+
+    const p = this.loadModel(model);
+    this.loading.set(model, p);
+
+    try {
+      const ok = await p;
+      if (ok) {
+        this.loaded.set(model, true);
+        this.updateAccess(model);
+        this.stats.set(model, { loads: (this.stats.get(model)?.loads || 0) + 1 });
+      }
+      return ok;
+    } finally { this.loading.delete(model); }
+  }
+
+  async loadModel(model) {
+    const body = JSON.stringify({ model, prompt: "1", stream: false, options: { num_predict: 1 } });
+    return new Promise((resolve) => {
+      const req = http.request({ hostname: 'localhost', port: 11434, path: '/api/generate', method: 'POST', agent: ultraAgent, headers: { 'Content-Type': 'application/json' } }, (res) => {
+        resolve(res.statusCode === 200);
+      });
+      req.on('error', () => resolve(false));
+      req.write(body); req.end();
     });
+  }
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+  getStats() {
+    return { loaded: [...this.loaded.keys()], lastAccess: Object.fromEntries(this.lastAccess), stats: Object.fromEntries(this.stats) };
+  }
+}
+const modelCache = new ModelCache();
 
-    const reader = res.body;
-    let buffer = '';
 
-    reader.on('data', (chunk) => {
+async function generate(model, prompt, ws) {
+  if (!await modelCache.ensureLoaded(model)) return ws.send(JSON.stringify({ type: 'error', message: `Falha ao carregar ${model}` }));
+
+  const body = JSON.stringify({ model, prompt, stream: true, keep_alive: CONFIG.KEEP_ALIVE, options: CONFIG.MODEL_OPTIONS });
+  const req = http.request({ hostname: 'localhost', port: 11434, path: '/api/generate', method: 'POST', agent: ultraAgent, headers: { 'Content-Type': 'application/json', 'Accept': 'application/x-ndjson' } }, (res) => {
+    let buffer = '', tokens = 0, firstTokenTime = null, start = Date.now();
+
+    ws.send(JSON.stringify({ type: 'start', model }));
+
+    res.on('data', (chunk) => {
       buffer += chunk.toString();
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+      const lines = buffer.split('\n'); buffer = lines.pop() || '';
 
       for (const line of lines) {
         if (!line.trim()) continue;
-        try {
-          const data = JSON.parse(line);
-          if (data.response) {
-            ws.send(JSON.stringify({ type: 'token', text: data.response }));
-          }
-          if (data.done) {
-            ws.send(JSON.stringify({ type: 'done' }));
-          }
-        } catch (err) {
-          console.warn("Erro ao parsear linha:", line);
+        const data = JSON.parse(line);
+
+        if (data.response) {
+          if (firstTokenTime === null) firstTokenTime = Date.now();
+          tokens++;
+          ws.send(JSON.stringify({ type: 'token', text: data.response }));
+        }
+
+        if (data.done) {
+          const total = Date.now() - start, ttft = firstTokenTime ? (firstTokenTime - start) : 0;
+          ws.send(JSON.stringify({ type: 'done', stats: { tokens, total, ttft } }));
         }
       }
     });
-
-    reader.on('end', () => {
-      ws.send(JSON.stringify({ type: 'done' }));
-    });
-
-    reader.on('error', (err) => {
-      console.error("Erro no stream:", err);
-      ws.send(JSON.stringify({ type: 'error', message: err.message }));
-    });
-
-  } catch (err) {
-    console.error("Erro ao gerar resposta:", err.message);
-    ws.send(JSON.stringify({ type: 'error', message: err.message }));
-  }
+  });
+  req.on('error', e => ws.send(JSON.stringify({ type: 'error', message: e.message })));
+  req.write(body); req.end();
 }
 
 wss.on('connection', (ws, req) => {
-  const clientIp = req.socket.remoteAddress;
-  console.log(`Nova conexão WebSocket de ${clientIp}`);
+  console.log(`🚀 Conexão: ${req.socket.remoteAddress}`);
+  ws.isAlive = true;
+  ws.on('pong', () => ws.isAlive = true);
 
-  ws.on('message', async (message) => {
-    try {
-      const data = JSON.parse(message.toString());
-      const { prompt, modelo } = data;
+  ws.on('message', async (msg) => {
+    const { prompt, modelo } = JSON.parse(msg.toString());
+    if (!prompt?.trim()) return ws.send(JSON.stringify({ type: 'error', message: 'Prompt vazio' }));
 
-      if (!prompt || prompt.trim() === '') {
-        ws.send(JSON.stringify({ type: 'error', message: 'Prompt não pode estar vazio' }));
-        return;
-      }
+    const models = await getModels();
+    const selected = modelo && models.includes(modelo) ? modelo : models[0];
+    if (!selected) return ws.send(JSON.stringify({ type: 'error', message: 'Nenhum modelo disponível' }));
 
-      const modelosDisponiveis = await listarModelos();
-      const modeloEscolhido = modelo && modelosDisponiveis.includes(modelo)
-        ? modelo
-        : await getModeloPadrao();
-
-      if (!modeloEscolhido) {
-        ws.send(JSON.stringify({ type: 'error', message: 'Nenhum modelo disponível no Ollama' }));
-        return;
-      }
-
-      console.log(`Prompt de ${clientIp}: "${prompt.substring(0, 50)}..."`);
-      console.log(`Usando modelo: ${modeloEscolhido}`);
-
-      await gerarRespostaStream(modeloEscolhido, prompt, ws);
-
-    } catch (err) {
-      console.error("Erro ao processar mensagem:", err);
-      ws.send(JSON.stringify({ type: 'error', message: 'Erro ao processar mensagem' }));
-    }
+    generate(selected, prompt, ws);
   });
 
-  ws.send(JSON.stringify({
-    type: 'info',
-    message: 'Conectado ao SofiaAI WebSocket Server!'
-  }));
+  ws.send(JSON.stringify({ type: 'connected', mode: 'ULTRA_FAST' }));
 });
 
-// 🔹 Endpoints HTTP
+setInterval(() => {
+  wss.clients.forEach((ws) => { if (!ws.isAlive) return ws.terminate(); ws.isAlive = false; ws.ping(); });
+}, 15000);
+
+let cache = [], lastFetch = 0;
+async function getModels() {
+  if (cache.length && Date.now() - lastFetch < 60000) return cache;
+  try {
+    const r = await fetch(`${OLLAMA_URL}/api/tags`, { agent: ultraAgent });
+    if (r.ok) { const d = await r.json(); cache = d.models?.map(m => m.name) || []; lastFetch = Date.now(); }
+  } catch { }
+  return cache;
+}
+
 app.get('/api/status', async (req, res) => {
-  const modelos = await listarModelos();
-  res.json({
-    status: 'online',
-    ollama: modelos.length > 0 ? 'connected' : 'disconnected',
-    modelos,
-    conexoes: wss.clients.size
-  });
+  res.json({ status: 'ok', models: await getModels(), cache: modelCache.getStats(), connections: wss.clients.size });
+});
+app.get('/api/models', async (req, res) => res.json({ models: await getModels() }));
+app.post('/api/preload/:model', async (req, res) => res.json({ success: await modelCache.ensureLoaded(req.params.model) }));
+
+app.get('*', (req, res) => { //Modo deploy
+    res.sendFile(path.join(distPath, 'index.html'));
 });
 
-app.get('/api/modelos', async (req, res) => {
-  const modelos = await listarModelos();
-  res.json({ modelos });
-});
+const PORT = process.env.PORT || 4000;
 
-// Inicialização do servidor
-const PORT = process.env.PORT || 3000;
 server.listen(PORT, async () => {
-  console.log(`SofiaAI WebSocket Server rodando na porta ${PORT}`);
-  console.log(`WebSocket: ws://localhost:${PORT}/ws`);
-  console.log(`API: http://localhost:${PORT}`);
-
-  const modelos = await listarModelos();
-  console.log("\nModelos encontrados no Ollama:");
-  modelos.forEach(m => console.log(` - ${m}`));
-  console.log(`\nModelo padrão: ${await getModeloPadrao()}`);
+  console.log(`🚀 SofiaAI UltraFast rodando em http://localhost:${PORT}`);
+  const models = await getModels();
+  if (models.length) await modelCache.ensureLoaded(models[0]);
 });

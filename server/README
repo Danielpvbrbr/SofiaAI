@@ -1,0 +1,120 @@
+Perfeito 🚀 Vou montar um mini README com os endpoints do seu servidor SofiaAI Ultra Fast. Assim você ou qualquer outra pessoa que mexer no projeto não se perde mais.
+
+📖 SofiaAI Ultra Fast API
+
+Servidor em Node.js para interface com Ollama via REST e WebSocket.
+Focado em máxima performance, cache de modelos e baixa latência.
+
+🌐 Endpoints HTTP
+🔍 Status
+
+GET /api/status
+Retorna informações gerais do servidor.
+
+Exemplo de resposta:
+
+{
+  "status": "🚀 ULTRA_FAST",
+  "totalModels": 2,
+  "activeModels": 1,
+  "cache": { ... },
+  "connections": 3,
+  "config": { ... },
+  "performance": {
+    "mode": "MAXIMUM_PERFORMANCE",
+    "keepAlive": "60m",
+    "batchSize": 64
+  }
+}
+
+🤖 Modelos disponíveis
+
+GET /api/models
+Lista os modelos carregados no Ollama.
+
+Resposta:
+
+{
+  "models": ["sofiaai_phi:latest", "llama3.2:3b"],
+  "cached": true
+}
+
+⚡ Modelos ativos
+
+GET /api/status
+Já inclui os modelos ativos (activeModels).
+
+🔥 Pré-carregar modelo
+
+POST /api/preload/:model
+Carrega um modelo na memória antes do uso.
+
+Exemplo:
+
+POST /api/preload/sofiaai_phi:latest
+
+
+Resposta:
+
+{
+  "success": true,
+  "model": "sofiaai_phi:latest",
+  "duration": 850,
+  "message": "Modelo sofiaai_phi:latest carregado em 850ms"
+}
+
+📈 Performance
+
+GET /api/performance
+Mostra otimizações ativas e dicas de performance.
+
+🔌 WebSocket
+
+Conectar em:
+
+ws://<SEU_IP>:4000/ws
+
+Mensagem de entrada
+{
+  "prompt": "Olá, tudo bem?",
+  "modelo": "sofiaai_phi:latest"
+}
+
+Mensagens recebidas
+
+Conexão inicial
+
+{ "type": "connected", "mode": "ULTRA_FAST", "config": { ... } }
+
+
+Início da geração
+
+{ "type": "start", "modelo": "sofiaai_phi:latest", "loadTime": 200 }
+
+
+Token gerado
+
+{ "type": "token", "text": "Olá" }
+
+
+Finalização
+
+{
+  "type": "done",
+  "stats": {
+    "tokens": 20,
+    "totalTime": 1200,
+    "tokensPerSecond": 16.6,
+    "ttft": 300
+  }
+}
+
+
+Erro
+
+{ "type": "error", "message": "Falha ao carregar modelo" }
+
+⚙️ Variáveis de ambiente recomendadas
+export OLLAMA_NUM_PARALLEL=4
+export OLLAMA_MAX_LOADED_MODELS=2
+export OLLAMA_FLASH_ATTENTION=1

@@ -2,7 +2,7 @@ import { createContext, useState, useEffect, useRef } from "react";
 
 export const AuthContext = createContext({});
 
-export default function AuthProvider({ children, apiBaseUrl = "http://localhost:3000" }) {
+export default function AuthProvider({ children, apiBaseUrl = "http://20.66.88.228:4000" }) {
     const [messages, setMessages] = useState([]);
     const [isConnected, setIsConnected] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
@@ -15,28 +15,25 @@ export default function AuthProvider({ children, apiBaseUrl = "http://localhost:
     const socketRef = useRef(null);
     const statusIntervalRef = useRef(null);
     const selectedModelRef = useRef(selectedModel);
+    const currentResponseRef = useRef(""); // Buffer para a resposta atual
 
-    // Atualiza ref sempre que o modelo muda (para usar dentro do onmessage)
+    // Atualiza ref sempre que o modelo muda
     useEffect(() => {
         selectedModelRef.current = selectedModel;
     }, [selectedModel]);
 
-    // Deriva wsUrl a partir da apiBaseUrl (http -> ws, https -> wss)
     const wsUrl = apiBaseUrl.replace(/^http/, "ws") + "/ws";
 
-    // Normaliza lista de modelos (aceita array de strings ou array de objetos com .name)
     const normalizeModels = (rawList) => {
         if (!Array.isArray(rawList)) return [];
         return rawList.map((item) => (typeof item === "string" ? item : item?.name || String(item)));
     };
 
-    // Busca modelos do backend
     const fetchModels = async () => {
         try {
-            const res = await fetch(`${apiBaseUrl}/api/modelos`);
+            const res = await fetch(`${apiBaseUrl}/api/models`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
-            // compatibilidade: { modelos } ou { models } ou array direto
             const raw = data.modelos || data.models || data;
             const lista = normalizeModels(raw);
             setModels(lista);
@@ -50,7 +47,6 @@ export default function AuthProvider({ children, apiBaseUrl = "http://localhost:
         }
     };
 
-    // Busca status do servidor (e atualiza state)
     const fetchServerStatus = async () => {
         try {
             const res = await fetch(`${apiBaseUrl}/api/status`);
@@ -86,7 +82,6 @@ export default function AuthProvider({ children, apiBaseUrl = "http://localhost:
         }
     };
 
-    // Conecta websocket e define handlers
     const connectWebSocket = () => {
         try {
             const socket = new WebSocket(wsUrl);
@@ -102,41 +97,61 @@ export default function AuthProvider({ children, apiBaseUrl = "http://localhost:
                 try {
                     const data = JSON.parse(event.data);
 
-                    if (data.type === "token") {
-                        // adiciona token ao último assistant (ou cria se não existir)
+                    if (data.type === "start") {
+                        // Nova geração iniciada - limpa o buffer
+                        currentResponseRef.current = "";
+                        console.log("Iniciando geração com modelo:", data.model);
+                        
+                    } else if (data.type === "token") {
+                        // Adiciona token ao buffer
+                        currentResponseRef.current += data.text;
+                        
+                        // Atualiza a última mensagem assistant com o conteúdo completo do buffer
                         setMessages((prev) => {
                             const updated = [...prev];
-                            const last = updated[updated.length - 1];
-
-                            if (last && last.role === "assistant") {
-                                // evita duplicação simples (quando servidor reenvia algo)
-                                if (!last.text.includes(data.text)) {
-                                    last.text += data.text;
-                                }
-                            } else {
-                                updated.push({
-                                    role: "assistant",
-                                    text: data.text,
-                                    model: selectedModelRef.current,
-                                    timestamp: new Date().toLocaleTimeString(),
-                                });
+                            const lastIndex = updated.length - 1;
+                            
+                            if (lastIndex >= 0 && updated[lastIndex].role === "assistant") {
+                                // Atualiza a mensagem existente com todo o conteúdo acumulado
+                                updated[lastIndex] = {
+                                    ...updated[lastIndex],
+                                    text: currentResponseRef.current,
+                                    model: selectedModelRef.current
+                                };
                             }
                             return updated;
                         });
+                        
                     } else if (data.type === "done") {
+                        console.log("Geração finalizada:", data.stats);
                         setIsGenerating(false);
+                        // Limpa o buffer após finalizar
+                        currentResponseRef.current = "";
+                        
                     } else if (data.type === "error") {
+                        console.error("Erro do servidor:", data.message);
                         setMessages((prev) => [
                             ...prev,
-                            { role: "error", text: data.message, timestamp: new Date().toLocaleTimeString() },
+                            { 
+                                role: "error", 
+                                text: data.message, 
+                                timestamp: new Date().toLocaleTimeString() 
+                            },
                         ]);
                         setIsGenerating(false);
+                        currentResponseRef.current = "";
+                        
+                    } else if (data.type === "connected") {
+                        console.log("Conectado ao servidor:", data.mode);
+                        
                     } else if (data.type === "info") {
-                        console.log("ℹInfo do servidor:", data.message);
+                        console.log("Info do servidor:", data.message);
                     }
+                    
                 } catch (err) {
                     console.warn("Erro ao parsear mensagem WS:", err);
                     setIsGenerating(false);
+                    currentResponseRef.current = "";
                 }
             };
 
@@ -145,8 +160,7 @@ export default function AuthProvider({ children, apiBaseUrl = "http://localhost:
                 socketRef.current = null;
                 setIsConnected(false);
                 setIsGenerating(false);
-
-                // tenta reconectar
+                currentResponseRef.current = "";
                 attemptReconnect();
             };
 
@@ -154,12 +168,11 @@ export default function AuthProvider({ children, apiBaseUrl = "http://localhost:
                 console.error("Erro no WebSocket:", err);
                 setIsConnected(false);
                 setIsGenerating(false);
+                currentResponseRef.current = "";
             };
 
-            // guarda o socket também no state (opcional)
-            setTimeout(() => setIsConnected(socket.readyState === WebSocket.OPEN), 0);
-
             return socket;
+            
         } catch (err) {
             console.error("Falha ao criar WebSocket:", err);
             setIsConnected(false);
@@ -168,74 +181,103 @@ export default function AuthProvider({ children, apiBaseUrl = "http://localhost:
         }
     };
 
-    // Envia mensagem (usada pelo componente)
     const sendMessage = (text) => {
         const message = (text || "").trim();
         if (!message) return;
-        if (isGenerating) return;
+        if (isGenerating) {
+            console.warn("Já existe uma geração em andamento");
+            return;
+        }
 
         const socket = socketRef.current;
         if (!socket || socket.readyState !== WebSocket.OPEN) {
             console.warn("WebSocket não está conectado");
             setMessages((prev) => [
                 ...prev,
-                { role: "error", text: "WebSocket desconectado. Tentando reconectar...", timestamp: new Date().toLocaleTimeString() },
+                { 
+                    role: "error", 
+                    text: "WebSocket desconectado. Tentando reconectar...", 
+                    timestamp: new Date().toLocaleTimeString() 
+                },
             ]);
-            // opcional: tentar forçar reconexão
             if (!socketRef.current) connectWebSocket();
             return;
         }
 
-        // adiciona mensagens locais (user + assistant placeholder)
         const timestamp = new Date().toLocaleTimeString();
+        
+        // Adiciona mensagem do usuário e placeholder para assistant
         setMessages((prev) => [
             ...prev,
             { role: "user", text: message, timestamp },
-            { role: "assistant", text: "", model: selectedModelRef.current, timestamp },
+            { 
+                role: "assistant", 
+                text: "", 
+                model: selectedModelRef.current, 
+                timestamp,
+                generating: true // Flag para identificar que está sendo gerada
+            },
         ]);
 
-        // envia para backend (campo 'modelo' no seu backend)
+        // Limpa o buffer antes de enviar nova mensagem
+        currentResponseRef.current = "";
+
         try {
-            socket.send(JSON.stringify({ prompt: message, modelo: selectedModelRef.current }));
+            socket.send(JSON.stringify({ 
+                prompt: message, 
+                modelo: selectedModelRef.current 
+            }));
             setIsGenerating(true);
         } catch (err) {
             console.error("Erro ao enviar via WebSocket:", err);
             setIsGenerating(false);
-            setMessages((prev) => [...prev, { role: "error", text: "Erro ao enviar mensagem", timestamp }]);
+            currentResponseRef.current = "";
+            setMessages((prev) => [
+                ...prev.slice(0, -1), // Remove a mensagem placeholder
+                { 
+                    role: "error", 
+                    text: "Erro ao enviar mensagem", 
+                    timestamp 
+                }
+            ]);
         }
     };
 
-    const clearChat = () => setMessages([]);
-    const newChat = () => {
-        clearChat();
-        // opcional: resetar modelo para o primeiro disponível
-        if (models.length > 0) setSelectedModel(models[0]);
+    const clearChat = () => {
+        setMessages([]);
+        currentResponseRef.current = "";
     };
 
-    // inicia conexão, fetch inicial, polling de status
+    const newChat = () => {
+        clearChat();
+        if (models.length > 0) {
+            setSelectedModel(models[0]);
+        }
+    };
+
     useEffect(() => {
-        // buscar modelos e status, depois conectar WS
         (async () => {
             await fetchModels();
             await fetchServerStatus();
             connectWebSocket();
-            // polling de status
             statusIntervalRef.current = setInterval(fetchServerStatus, 30000);
         })();
 
         return () => {
-            // cleanup
             if (socketRef.current) {
                 try {
                     socketRef.current.close();
-                } catch (e) { }
+                } catch (e) { 
+                    console.warn("Erro ao fechar WebSocket:", e);
+                }
             }
-            if (statusIntervalRef.current) clearInterval(statusIntervalRef.current);
+            if (statusIntervalRef.current) {
+                clearInterval(statusIntervalRef.current);
+            }
+            currentResponseRef.current = "";
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [apiBaseUrl]); // se trocar apiBaseUrl, refaz tudo
+    }, [apiBaseUrl]);
 
-    // expose everything the UI needs
     return (
         <AuthContext.Provider
             value={{
